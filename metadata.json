@@ -1,0 +1,6 @@
+{
+  "name": "CartNova",
+  "description": "CartNova - Global e-commerce store with light & dark mode, live dispatch van driver tracking & direct contact, customer delivery address updates with GPS pinning, AI Shopping Assistant, and multi-currency support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

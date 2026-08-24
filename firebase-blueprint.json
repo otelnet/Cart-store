@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with contact info and address defaults",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "name": { "type": "string", "maxLength": 128 },
+        "avatar": { "type": "string", "maxLength": 512 },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["userId", "email", "name", "role"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order with items, shipping details, and live fulfillment status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 128 },
+        "customerEmail": { "type": "string", "maxLength": 256 },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["confirmed", "processing", "packed", "in_transit", "delivered", "cancelled"] },
+        "paymentMethod": { "type": "string", "maxLength": 64 },
+        "shippingAddress": { "type": "object" },
+        "trackingNumber": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "customerEmail", "totalAmount", "status", "createdAt"]
+    },
+    "SourcingRequest": {
+      "title": "SourcingRequest",
+      "description": "Custom product sourcing quote and procurement request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "userName": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 256 },
+        "sourceUrl": { "type": "string", "maxLength": 1024 },
+        "category": { "type": "string", "maxLength": 64 },
+        "targetBudget": { "type": "number" },
+        "quantity": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "estimatedPrice": { "type": "number" },
+        "originalMarketPrice": { "type": "number" },
+        "estimatedDeliveryDays": { "type": "string", "maxLength": 64 },
+        "sourceOrigin": { "type": "string", "maxLength": 128 },
+        "imageUrl": { "type": "string", "maxLength": 1024 },
+        "status": { "type": "string", "enum": ["quoted", "approved", "in_procurement", "dispatched", "rejected"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "productName", "estimatedPrice", "status", "createdAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Administrator allowlist document for RBAC validation",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "grantedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["userId", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile documents"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "All customer placed orders"
+    },
+    "/sourcing_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/SourcingRequest" },
+      "description": "Custom Jumia & global product sourcing quotes"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "System administrator document validation collection"
+    }
+  }
+}
