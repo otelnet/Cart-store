@@ -75,6 +75,7 @@ export interface UserProfile {
   dietaryPreferences: DietaryTag[];
   savedAddresses: DeliveryAddress[];
   savedPaymentMethods: SavedPaymentMethod[];
+  authProvider?: 'google' | 'password' | 'demo';
   notifications: {
     email: boolean;
     sms: boolean;
@@ -247,6 +248,19 @@ export interface Order {
   address: DeliveryAddress;
   timeSlot: string;
   paymentMethod: string;
+  paymentReference?: string;
+  paymentGateway?: 'paystack' | 'stripe' | 'paypal' | 'cod' | 'apple_pay';
+  paymentStatus?: 'paid' | 'pending' | 'failed';
+  paystackDetails?: {
+    reference: string;
+    channel?: string;
+    paidAt?: string;
+    currency?: string;
+    last4?: string;
+    brand?: string;
+    bank?: string;
+    gatewayResponse?: string;
+  };
   estimatedDeliveryTime: string;
   shopper: {
     name: string;

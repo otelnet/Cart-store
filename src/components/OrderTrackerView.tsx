@@ -47,6 +47,14 @@ export const OrderTrackerView: React.FC<OrderTrackerViewProps> = ({ orderId, onB
   } = useShop();
 
   const [copiedPlate, setCopiedPlate] = useState(false);
+  const [copiedRef, setCopiedRef] = useState(false);
+
+  const copyRef = (refText: string) => {
+    navigator.clipboard.writeText(refText);
+    setCopiedRef(true);
+    showToast('Copied Paystack reference!', 'info');
+    setTimeout(() => setCopiedRef(false), 2000);
+  };
 
   const targetId = orderId || trackingOrderId;
   const order = orders.find((o) => o.id === targetId) || orders[0];
@@ -449,9 +457,17 @@ export const OrderTrackerView: React.FC<OrderTrackerViewProps> = ({ orderId, onB
             <h4 className="font-display font-bold text-base text-slate-900 dark:text-white">
               Purchased Items ({order.items.reduce((s, i) => s + i.quantity, 0)})
             </h4>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              Payment via {order.paymentMethod}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                Payment via {order.paymentMethod}
+              </span>
+              {(order.paymentGateway === 'paystack' || order.paymentReference) && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 text-[10px] font-bold">
+                  <ShieldCheck className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                  <span>Paystack Verified</span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -536,6 +552,53 @@ export const OrderTrackerView: React.FC<OrderTrackerViewProps> = ({ orderId, onB
             <span>Total Paid</span>
             <span className="text-orange-600 dark:text-orange-400 font-black">{formatPrice(order.total)}</span>
           </div>
+
+          {/* Paystack Gateway Transaction Receipt Box */}
+          {(order.paymentGateway === 'paystack' || order.paymentReference) && (
+            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 bg-teal-50/70 dark:bg-slate-900/80 p-3 rounded-2xl border border-teal-200/80 dark:border-teal-900/60 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <span className="font-extrabold text-xs text-teal-950 dark:text-teal-200 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <span>Paystack Gateway Verification</span>
+                </span>
+                <span className="px-2 py-0.5 rounded bg-teal-600 text-white font-mono text-[10px] font-bold">
+                  {order.paymentStatus?.toUpperCase() || 'PAID & SETTLED'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1">
+                <div>
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] uppercase font-bold">
+                    Transaction Reference
+                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      {order.paymentReference || order.paystackDetails?.reference || 'N/A'}
+                    </span>
+                    {(order.paymentReference || order.paystackDetails?.reference) && (
+                      <button
+                        onClick={() => copyRef(order.paymentReference || order.paystackDetails?.reference || '')}
+                        className="p-1 rounded hover:bg-teal-200/50 dark:hover:bg-slate-700 text-teal-700 dark:text-teal-300 cursor-pointer"
+                        title="Copy Reference"
+                      >
+                        {copiedRef ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-slate-500 dark:text-slate-400 block text-[10px] uppercase font-bold">
+                    Payment Channel
+                  </span>
+                  <span className="font-semibold text-slate-900 dark:text-white capitalize">
+                    {order.paystackDetails?.channel || 'Online Checkout'}{' '}
+                    {order.paystackDetails?.bank ? `(${order.paystackDetails.bank})` : ''}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

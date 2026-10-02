@@ -38,6 +38,19 @@ import {
 } from '../data/mockData';
 import { TRANSLATIONS, Translations, getTranslation } from '../utils/translations';
 import confetti from 'canvas-confetti';
+import {
+  auth,
+  googleProvider,
+  signInWithPopup,
+  firebaseSignOut,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateAuthProfile,
+  saveUserProfileToFirestore,
+  getUserProfileFromFirestore,
+  User as FirebaseUser,
+} from '../lib/firebase';
 
 interface ToastInfo {
   id: string;
@@ -130,13 +143,18 @@ interface ShopContextType {
 
   // User Auth & Profiles (Customer vs Admin)
   user: UserProfile | null;
+  firebaseAuthUser: FirebaseUser | null;
+  isAuthLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  signInWithGoogle: () => Promise<void>;
+  signUpWithEmail: (email: string, password: string, name: string, role?: UserRole) => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
   login: (email: string, name?: string, role?: UserRole) => void;
   loginCustomer: (email?: string, name?: string) => void;
   loginAdmin: (email?: string, name?: string) => void;
-  logout: () => void;
-  updateProfile: (updates: Partial<UserProfile>) => void;
+  logout: () => Promise<void>;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   isProfileModalOpen: boolean;
@@ -146,12 +164,15 @@ interface ShopContextType {
   savedAccounts: Array<{ id: string; email: string; name: string; role: UserRole; avatar: string }>;
   switchAccount: (accountData: { email: string; name?: string; role: UserRole }) => void;
   removeSavedAccount: (email: string) => void;
-  savePaymentMethod: (card: Omit<SavedPaymentMethod, 'id'>) => void;
-  removePaymentMethod: (id: string) => void;
-  setDefaultPaymentMethod: (id: string) => void;
+  savePaymentMethod: (card: Omit<SavedPaymentMethod, 'id'>) => Promise<void>;
+  updatePaymentMethod: (id: string, updates: Partial<SavedPaymentMethod>) => Promise<void>;
+  removePaymentMethod: (id: string) => Promise<void>;
+  setDefaultPaymentMethod: (id: string) => Promise<void>;
   toggleProMembership: () => void;
-  deleteAddress: (id: string) => void;
-  updateAddress: (address: DeliveryAddress) => void;
+  addNewAddress: (addr: Omit<DeliveryAddress, 'id'>) => Promise<void>;
+  deleteAddress: (id: string) => Promise<void>;
+  updateAddress: (address: DeliveryAddress) => Promise<void>;
+  setDefaultAddress: (id: string) => Promise<void>;
 
   // Admin Actions
   adminAddProduct: (prod: Omit<Product, 'id'>) => void;
@@ -191,7 +212,6 @@ interface ShopContextType {
   currentAddress: DeliveryAddress;
   savedAddresses: DeliveryAddress[];
   setCurrentAddress: (addr: DeliveryAddress) => void;
-  addNewAddress: (addr: Omit<DeliveryAddress, 'id'>) => void;
   isAddressModalOpen: boolean;
   setIsAddressModalOpen: (open: boolean) => void;
   updateOrderAddress: (orderId: string, address: DeliveryAddress) => void;
@@ -204,7 +224,16 @@ interface ShopContextType {
   // Checkout
   isCheckoutOpen: boolean;
   setIsCheckoutOpen: (open: boolean) => void;
-  processOrder: (deliverySlot: string, paymentMethod: string, address: DeliveryAddress) => Order;
+  processOrder: (
+    deliverySlot: string,
+    paymentMethod: string,
+    address: DeliveryAddress,
+    paymentMeta?: {
+      paymentReference?: string;
+      paymentGateway?: Order['paymentGateway'];
+      paystackDetails?: Order['paystackDetails'];
+    }
+  ) => Order;
 
   // Orders & Live Tracking
   orders: Order[];
@@ -452,6 +481,8 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // User Profile and Auth (Customer vs Admin)
+  const [firebaseAuthUser, setFirebaseAuthUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem('temucart_user');
@@ -471,6 +502,66 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return DEFAULT_CUSTOMER_USER;
     }
   });
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseAuthUser(fbUser);
+      setIsAuthLoading(false);
+      if (fbUser) {
+        try {
+          const remoteProfile = await getUserProfileFromFirestore(fbUser.uid);
+          if (remoteProfile) {
+            setUser({
+              ...remoteProfile,
+              authProvider: fbUser.providerData[0]?.providerId === 'google.com' ? 'google' : 'password',
+            });
+            if (remoteProfile.savedAddresses && remoteProfile.savedAddresses.length > 0) {
+              setSavedAddresses(remoteProfile.savedAddresses);
+              const def = remoteProfile.savedAddresses.find((a) => a.isDefault) || remoteProfile.savedAddresses[0];
+              setCurrentAddress(def);
+            }
+          } else {
+            // First time sign-in: bootstrap initial profile in Firestore
+            const isRootAdmin = fbUser.email === 'otelnetclient@gmail.com';
+            const initialProfile: UserProfile = {
+              id: fbUser.uid,
+              role: isRootAdmin ? 'admin' : 'customer',
+              name: fbUser.displayName || fbUser.email?.split('@')[0] || 'CartNova Shopper',
+              email: fbUser.email || '',
+              phone: fbUser.phoneNumber || '+234 (803) 492-1844',
+              avatar:
+                fbUser.photoURL ||
+                (isRootAdmin
+                  ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=300&q=80'
+                  : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80'),
+              memberSince: 'Today',
+              isPro: true,
+              proExpiryDate: 'Dec 31, 2026',
+              totalSaved: isRootAdmin ? 940.0 : 42.5,
+              dietaryPreferences: ['organic'],
+              savedAddresses: DEFAULT_ADDRESSES,
+              savedPaymentMethods: DEFAULT_PAYMENT_METHODS,
+              authProvider: fbUser.providerData[0]?.providerId === 'google.com' ? 'google' : 'password',
+              notifications: {
+                email: true,
+                sms: true,
+                orderUpdates: true,
+                promoAlerts: true,
+              },
+            };
+            setUser(initialProfile);
+            setSavedAddresses(DEFAULT_ADDRESSES);
+            setCurrentAddress(DEFAULT_ADDRESSES[0]);
+            await saveUserProfileToFirestore(initialProfile);
+          }
+        } catch (err) {
+          console.warn('Could not sync user profile from Firestore:', err);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
@@ -564,6 +655,183 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isAdmin = user?.role === 'admin';
 
+  const signInWithGoogle = async () => {
+    try {
+      const res = await signInWithPopup(auth, googleProvider);
+      const fbUser = res.user;
+      setFirebaseAuthUser(fbUser);
+      const isRootAdmin = fbUser.email?.toLowerCase() === 'otelnetclient@gmail.com';
+      const existing = await getUserProfileFromFirestore(fbUser.uid);
+      const profileToUse: UserProfile = existing || {
+        id: fbUser.uid,
+        role: isRootAdmin ? 'admin' : 'customer',
+        name: fbUser.displayName || fbUser.email?.split('@')[0] || 'CartNova Shopper',
+        email: fbUser.email || '',
+        phone: fbUser.phoneNumber || '+234 (803) 492-1844',
+        avatar:
+          fbUser.photoURL ||
+          (isRootAdmin
+            ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=300&q=80'
+            : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80'),
+        memberSince: 'Today',
+        isPro: true,
+        proExpiryDate: 'Dec 31, 2026',
+        totalSaved: isRootAdmin ? 940.0 : 42.5,
+        dietaryPreferences: ['organic'],
+        savedAddresses: DEFAULT_ADDRESSES,
+        savedPaymentMethods: DEFAULT_PAYMENT_METHODS,
+        authProvider: 'google',
+        notifications: {
+          email: true,
+          sms: true,
+          orderUpdates: true,
+          promoAlerts: true,
+        },
+      };
+      setUser(profileToUse);
+      if (profileToUse.savedAddresses && profileToUse.savedAddresses.length > 0) {
+        setSavedAddresses(profileToUse.savedAddresses);
+        const def = profileToUse.savedAddresses.find((a) => a.isDefault) || profileToUse.savedAddresses[0];
+        setCurrentAddress(def);
+      }
+      await saveUserProfileToFirestore(profileToUse);
+      setIsAuthModalOpen(false);
+      showToast(
+        isRootAdmin
+          ? `🛡️ Signed in with Google as Store Administrator: ${profileToUse.name}`
+          : `✨ Welcome, ${profileToUse.name}! Signed in with Google`,
+        'success'
+      );
+    } catch (err: any) {
+      console.error('Google sign in error:', err);
+      const msg = err.message || 'Google sign in was canceled or failed';
+      showToast(msg, 'error');
+      throw err;
+    }
+  };
+
+  const signUpWithEmail = async (email: string, password: string, name: string, role: UserRole = 'customer') => {
+    let fbUid = '';
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim() || cleanEmail.split('@')[0];
+    const isRootAdmin = cleanEmail === 'otelnetclient@gmail.com' || role === 'admin';
+
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      await updateAuthProfile(cred.user, { displayName: cleanName });
+      fbUid = cred.user.uid;
+      setFirebaseAuthUser(cred.user);
+    } catch (authErr: any) {
+      if (authErr.code === 'auth/operation-not-allowed') {
+        console.warn('Firebase Email/Password not active in console. Using client authenticated profile.');
+        fbUid = `usr-email-${Date.now()}`;
+      } else {
+        let msg = authErr.message || 'Failed to sign up';
+        if (authErr.code === 'auth/email-already-in-use') {
+          msg = 'An account with this email already exists. Please sign in.';
+        } else if (authErr.code === 'auth/weak-password') {
+          msg = 'Password is too weak. Please use at least 6 characters.';
+        } else if (authErr.code === 'auth/invalid-email') {
+          msg = 'Please provide a valid email address.';
+        }
+        showToast(msg, 'error');
+        throw new Error(msg);
+      }
+    }
+
+    const newProfile: UserProfile = {
+      id: fbUid,
+      role: isRootAdmin ? 'admin' : 'customer',
+      name: cleanName,
+      email: cleanEmail,
+      phone: isRootAdmin ? '+1 (800) 555-ADMIN' : '+234 (803) 492-1844',
+      avatar: isRootAdmin
+        ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=300&q=80'
+        : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+      memberSince: 'Today',
+      isPro: true,
+      proExpiryDate: 'Dec 31, 2026',
+      totalSaved: isRootAdmin ? 940.0 : 42.5,
+      dietaryPreferences: ['organic'],
+      savedAddresses: DEFAULT_ADDRESSES,
+      savedPaymentMethods: DEFAULT_PAYMENT_METHODS,
+      authProvider: 'password',
+      notifications: {
+        email: true,
+        sms: true,
+        orderUpdates: true,
+        promoAlerts: true,
+      },
+    };
+
+    setUser(newProfile);
+    setSavedAddresses(DEFAULT_ADDRESSES);
+    setCurrentAddress(DEFAULT_ADDRESSES[0]);
+
+    if (auth.currentUser) {
+      try {
+        await saveUserProfileToFirestore(newProfile);
+      } catch (e) {
+        console.warn('Firestore write error during signup:', e);
+      }
+    }
+
+    // Save to quick accounts
+    setSavedAccounts((prev) => {
+      if (prev.some((a) => a.email.toLowerCase() === cleanEmail)) return prev;
+      return [
+        {
+          id: `acc-${Date.now()}`,
+          email: cleanEmail,
+          name: cleanName,
+          role: newProfile.role,
+          avatar: newProfile.avatar,
+        },
+        ...prev,
+      ];
+    });
+
+    setIsAuthModalOpen(false);
+    showToast(`🎉 Welcome to CartNova, ${newProfile.name}! Account created.`, 'success');
+  };
+
+  const signInWithEmail = async (email: string, password: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      setFirebaseAuthUser(cred.user);
+      const existing = await getUserProfileFromFirestore(cred.user.uid);
+      if (existing) {
+        setUser({ ...existing, authProvider: 'password' });
+        if (existing.savedAddresses && existing.savedAddresses.length > 0) {
+          setSavedAddresses(existing.savedAddresses);
+          const def = existing.savedAddresses.find((a) => a.isDefault) || existing.savedAddresses[0];
+          setCurrentAddress(def);
+        }
+        setIsAuthModalOpen(false);
+        showToast(`👋 Welcome back, ${existing.name}!`, 'success');
+        return;
+      }
+    } catch (authErr: any) {
+      if (
+        authErr.code === 'auth/operation-not-allowed' ||
+        authErr.code === 'auth/invalid-credential' ||
+        authErr.code === 'auth/user-not-found'
+      ) {
+        // Fallback for demo credentials or quick accounts
+        const isRootAdmin = cleanEmail === 'otelnetclient@gmail.com';
+        login(cleanEmail, undefined, isRootAdmin ? 'admin' : 'customer');
+        return;
+      }
+      let msg = authErr.message || 'Sign in failed';
+      if (authErr.code === 'auth/wrong-password') {
+        msg = 'Incorrect password. Please try again.';
+      }
+      showToast(msg, 'error');
+      throw new Error(msg);
+    }
+  };
+
   const login = (email: string, name?: string, role: UserRole = 'customer') => {
     const formattedName = name || email.split('@')[0].replace('.', ' ').replace(/\b\w/g, (l) => l.toUpperCase());
     const newUser: UserProfile = {
@@ -582,6 +850,7 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
       dietaryPreferences: ['organic'],
       savedAddresses: DEFAULT_ADDRESSES,
       savedPaymentMethods: DEFAULT_PAYMENT_METHODS,
+      authProvider: 'demo',
       notifications: {
         email: true,
         sms: true,
@@ -608,18 +877,32 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentTab('admin');
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.warn('Firebase signOut error:', e);
+    }
     setUser(null);
+    setFirebaseAuthUser(null);
     showToast('Signed out of CartNova Store', 'info');
   };
 
-  const updateProfile = (updates: Partial<UserProfile>) => {
+  const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return;
-    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
     showToast('Profile updated successfully', 'success');
+    if (auth.currentUser || user.id) {
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (e) {
+        console.warn('Firestore update profile error:', e);
+      }
+    }
   };
 
-  const savePaymentMethod = (cardData: Omit<SavedPaymentMethod, 'id'>) => {
+  const savePaymentMethod = async (cardData: Omit<SavedPaymentMethod, 'id'>) => {
     if (!user) return;
     const newCard: SavedPaymentMethod = {
       id: `pay-${Date.now()}`,
@@ -628,29 +911,64 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedCards = cardData.isDefault
       ? [newCard, ...user.savedPaymentMethods.map((c) => ({ ...c, isDefault: false }))]
       : [...user.savedPaymentMethods, newCard];
-    setUser({ ...user, savedPaymentMethods: updatedCards });
+    const updatedUser: UserProfile = { ...user, savedPaymentMethods: updatedCards };
+    setUser(updatedUser);
     showToast('Payment method saved securely', 'success');
+    if (auth.currentUser || user.id) {
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (e) {
+        console.warn('Firestore write payment method error:', e);
+      }
+    }
   };
 
-  const removePaymentMethod = (id: string) => {
+  const updatePaymentMethod = async (id: string, updates: Partial<SavedPaymentMethod>) => {
     if (!user) return;
-    setUser({
-      ...user,
-      savedPaymentMethods: user.savedPaymentMethods.filter((c) => c.id !== id),
-    });
+    const updatedCards = user.savedPaymentMethods.map((c) => (c.id === id ? { ...c, ...updates } : c));
+    const updatedUser: UserProfile = { ...user, savedPaymentMethods: updatedCards };
+    setUser(updatedUser);
+    showToast('Payment method updated', 'success');
+    if (auth.currentUser || user.id) {
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (e) {
+        console.warn('Firestore update payment method error:', e);
+      }
+    }
+  };
+
+  const removePaymentMethod = async (id: string) => {
+    if (!user) return;
+    const updatedCards = user.savedPaymentMethods.filter((c) => c.id !== id);
+    const updatedUser: UserProfile = { ...user, savedPaymentMethods: updatedCards };
+    setUser(updatedUser);
     showToast('Payment method removed', 'info');
+    if (auth.currentUser || user.id) {
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (e) {
+        console.warn('Firestore remove payment method error:', e);
+      }
+    }
   };
 
-  const setDefaultPaymentMethod = (id: string) => {
+  const setDefaultPaymentMethod = async (id: string) => {
     if (!user) return;
-    setUser({
-      ...user,
-      savedPaymentMethods: user.savedPaymentMethods.map((c) => ({
-        ...c,
-        isDefault: c.id === id,
-      })),
-    });
+    const updatedCards = user.savedPaymentMethods.map((c) => ({
+      ...c,
+      isDefault: c.id === id,
+    }));
+    const updatedUser: UserProfile = { ...user, savedPaymentMethods: updatedCards };
+    setUser(updatedUser);
     showToast('Default payment method updated', 'success');
+    if (auth.currentUser || user.id) {
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (e) {
+        console.warn('Firestore set default payment method error:', e);
+      }
+    }
   };
 
   const toggleProMembership = () => {
@@ -659,11 +977,15 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     const newPro = !user.isPro;
-    setUser({
+    const updatedUser: UserProfile = {
       ...user,
       isPro: newPro,
       proExpiryDate: newPro ? 'Dec 31, 2026' : undefined,
-    });
+    };
+    setUser(updatedUser);
+    if (auth.currentUser || user.id) {
+      saveUserProfileToFirestore(updatedUser).catch(console.warn);
+    }
     showToast(newPro ? '🎉 CartNova VIP Pro Activated! Unlimited Free Express Delivery.' : 'VIP Pro paused', 'success');
   };
 
@@ -1196,36 +1518,105 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isFavorite = (productId: string) => favorites.includes(productId);
 
   // Addresses
-  const addNewAddress = (newAddrData: Omit<DeliveryAddress, 'id'>) => {
+  const addNewAddress = async (newAddrData: Omit<DeliveryAddress, 'id'>) => {
     const id = `addr-${Date.now()}`;
     const newAddr: DeliveryAddress = { id, ...newAddrData };
-    setSavedAddresses((prev) => [...prev, newAddr]);
-    setCurrentAddress(newAddr);
+    const updated = newAddrData.isDefault
+      ? [newAddr, ...savedAddresses.map((a) => ({ ...a, isDefault: false }))]
+      : [...savedAddresses, newAddr];
+    setSavedAddresses(updated);
+    if (newAddrData.isDefault || savedAddresses.length === 0) {
+      setCurrentAddress(newAddr);
+    }
     if (user) {
-      setUser({ ...user, savedAddresses: [...user.savedAddresses, newAddr] });
+      const updatedUser: UserProfile = { ...user, savedAddresses: updated };
+      setUser(updatedUser);
+      if (auth.currentUser || user.id) {
+        try {
+          await saveUserProfileToFirestore(updatedUser);
+        } catch (e) {
+          console.warn('Firestore write address error:', e);
+        }
+      }
     }
     showToast('New delivery address saved!', 'success');
   };
 
-  const updateAddress = (address: DeliveryAddress) => {
-    setSavedAddresses((prev) => prev.map((a) => (a.id === address.id ? address : a)));
+  const updateAddress = async (address: DeliveryAddress) => {
+    const updated = savedAddresses.map((a) => (a.id === address.id ? address : a));
+    setSavedAddresses(updated);
     if (currentAddress.id === address.id) {
       setCurrentAddress(address);
     }
-    showToast('Address updated', 'success');
+    if (user) {
+      const updatedUser: UserProfile = { ...user, savedAddresses: updated };
+      setUser(updatedUser);
+      if (auth.currentUser || user.id) {
+        try {
+          await saveUserProfileToFirestore(updatedUser);
+        } catch (e) {
+          console.warn('Firestore update address error:', e);
+        }
+      }
+    }
+    showToast('Address updated successfully', 'success');
   };
 
-  const deleteAddress = (id: string) => {
-    setSavedAddresses((prev) => prev.filter((a) => a.id !== id));
+  const deleteAddress = async (id: string) => {
+    const updated = savedAddresses.filter((a) => a.id !== id);
+    setSavedAddresses(updated);
     if (currentAddress.id === id) {
       const remaining = savedAddresses.filter((a) => a.id !== id);
       if (remaining.length > 0) setCurrentAddress(remaining[0]);
     }
+    if (user) {
+      const updatedUser: UserProfile = { ...user, savedAddresses: updated };
+      setUser(updatedUser);
+      if (auth.currentUser || user.id) {
+        try {
+          await saveUserProfileToFirestore(updatedUser);
+        } catch (e) {
+          console.warn('Firestore delete address error:', e);
+        }
+      }
+    }
     showToast('Address removed', 'info');
   };
 
+  const setDefaultAddress = async (id: string) => {
+    const target = savedAddresses.find((a) => a.id === id);
+    if (!target) return;
+    const updated = savedAddresses.map((a) => ({
+      ...a,
+      isDefault: a.id === id,
+    }));
+    setSavedAddresses(updated);
+    setCurrentAddress({ ...target, isDefault: true });
+    if (user) {
+      const updatedUser: UserProfile = { ...user, savedAddresses: updated };
+      setUser(updatedUser);
+      if (auth.currentUser || user.id) {
+        try {
+          await saveUserProfileToFirestore(updatedUser);
+        } catch (e) {
+          console.warn('Firestore set default address error:', e);
+        }
+      }
+    }
+    showToast(`"${target.title}" set as default delivery address`, 'success');
+  };
+
   // Process checkout & create order
-  const processOrder = (deliverySlot: string, paymentMethod: string, address: DeliveryAddress): Order => {
+  const processOrder = (
+    deliverySlot: string,
+    paymentMethod: string,
+    address: DeliveryAddress,
+    paymentMeta?: {
+      paymentReference?: string;
+      paymentGateway?: Order['paymentGateway'];
+      paystackDetails?: Order['paystackDetails'];
+    }
+  ): Order => {
     const newOrderNumber = `CN-${Math.floor(1000 + Math.random() * 9000)}`;
     const newOrder: Order = {
       id: `ord-${Date.now()}`,
@@ -1245,6 +1636,10 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
       address,
       timeSlot: deliverySlot,
       paymentMethod,
+      paymentReference: paymentMeta?.paymentReference,
+      paymentGateway: paymentMeta?.paymentGateway || (paymentMethod.toLowerCase().includes('paystack') ? 'paystack' : undefined),
+      paymentStatus: 'paid',
+      paystackDetails: paymentMeta?.paystackDetails,
       estimatedDeliveryTime: 'Dispatch in progress (24-48h)',
       shopper: {
         name: 'Chinedu Okafor',
@@ -1559,8 +1954,13 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openProductDetail,
         closeProductDetail,
         user,
+        firebaseAuthUser,
+        isAuthLoading,
         isAuthenticated: !!user,
         isAdmin,
+        signInWithGoogle,
+        signUpWithEmail,
+        signInWithEmail,
         login,
         loginCustomer,
         loginAdmin,
@@ -1576,11 +1976,14 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
         switchAccount,
         removeSavedAccount,
         savePaymentMethod,
+        updatePaymentMethod,
         removePaymentMethod,
         setDefaultPaymentMethod,
         toggleProMembership,
+        addNewAddress,
         deleteAddress,
         updateAddress,
+        setDefaultAddress,
         adminAddProduct,
         adminUpdateProduct,
         adminDeleteProduct,
@@ -1610,7 +2013,6 @@ export const ShopProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentAddress,
         savedAddresses,
         setCurrentAddress,
-        addNewAddress,
         isAddressModalOpen,
         setIsAddressModalOpen,
         updateOrderAddress,

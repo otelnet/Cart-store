@@ -19,6 +19,7 @@ import {
   ArrowRight,
   Sun,
   Moon,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { RegionLanguageModal } from './RegionLanguageModal';
 
@@ -44,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenFilters }) => {
     isAdmin,
     setIsAuthModalOpen,
     setIsProfileModalOpen,
+    setIsAccountSwitcherOpen,
     minRating,
     onlyInStock,
     onlyOnSale,
@@ -102,15 +104,31 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenFilters }) => {
 
             {/* Right: Theme, Region / Language Switcher & Admin Status */}
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              {isAdmin && (
-                <button
-                  onClick={() => setCurrentTab('admin')}
-                  className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-extrabold text-[10px] flex items-center gap-1 hover:bg-amber-300 cursor-pointer shadow-xs"
-                >
-                  <Shield className="w-3 h-3" />
-                  <span>Admin Mode</span>
-                </button>
-              )}
+              {/* Account Role Badge & Switcher */}
+              <button
+                id="topbar-account-switcher-btn"
+                onClick={() => setIsAccountSwitcherOpen(true)}
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all ${
+                  isAdmin
+                    ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
+                    : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700'
+                }`}
+                title="Switch between Admin and Customer accounts"
+              >
+                {isAdmin ? (
+                  <>
+                    <Shield className="w-3 h-3 text-slate-950" />
+                    <span>Admin: {user?.name?.split(' ')[0] || 'Admin'}</span>
+                    <span className="text-[9px] opacity-75 underline ml-0.5">Switch</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingBag className="w-3 h-3 text-orange-400" />
+                    <span>Customer: {user?.name?.split(' ')[0] || 'Guest'}</span>
+                    <span className="text-[9px] opacity-75 underline ml-0.5">Switch</span>
+                  </>
+                )}
+              </button>
 
               {/* Theme Toggle in Top Bar */}
               <button
@@ -397,6 +415,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenFilters }) => {
                     <span className="hidden sm:inline">{t('signIn')}</span>
                   </div>
                 )}
+              </button>
+
+              {/* Quick Account Switcher Button */}
+              <button
+                id="switch-account-header-btn"
+                onClick={() => setIsAccountSwitcherOpen(true)}
+                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                  isAdmin
+                    ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-300 hover:bg-amber-100'
+                    : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                }`}
+                title="Switch between Admin & Customer accounts"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Switch Role</span>
               </button>
             </div>
           </div>

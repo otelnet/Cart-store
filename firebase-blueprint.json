@@ -8,8 +8,13 @@
         "userId": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 256 },
         "name": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 64 },
         "avatar": { "type": "string", "maxLength": 512 },
         "role": { "type": "string", "enum": ["customer", "admin"] },
+        "isPro": { "type": "boolean" },
+        "savedAddresses": { "type": "array" },
+        "savedPaymentMethods": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["userId", "email", "name", "role"]

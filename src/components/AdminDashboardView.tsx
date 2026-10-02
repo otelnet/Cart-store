@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useShop } from '../context/ShopContext';
 import {
   Shield,
@@ -19,6 +19,14 @@ import {
   Layers,
   MapPin,
   Clock,
+  CreditCard,
+  ShieldCheck,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw,
+  Key,
+  AlertCircle,
 } from 'lucide-react';
 import { Product, OrderStatus } from '../types';
 
@@ -32,15 +40,87 @@ export const AdminDashboardView: React.FC = () => {
     orders,
     formatPrice,
     user,
+    isAdmin,
+    loginAdmin,
+    setIsAccountSwitcherOpen,
+    setCurrentTab,
     regionConfig,
     sourcingRequests,
     updateSourcingRequestStatus,
     t,
+    showToast,
   } = useShop();
 
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'sourcing' | 'analytics'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'sourcing' | 'analytics' | 'paystack'>('products');
   const [productSearch, setProductSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
+
+  // Paystack Admin State
+  const [paystackConfig, setPaystackConfig] = useState<{
+    configured: boolean;
+    hasPublicKey: boolean;
+    publicKey: string | null;
+    mode: string;
+    supportedCurrencies?: string[];
+  }>({
+    configured: false,
+    hasPublicKey: false,
+    publicKey: null,
+    mode: 'test',
+  });
+  const [isFetchingPaystackConfig, setIsFetchingPaystackConfig] = useState(false);
+  const [verifyRefInput, setVerifyRefInput] = useState('');
+  const [isVerifyingRef, setIsVerifyingRef] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<any>(null);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  useEffect(() => {
+    fetchPaystackConfig();
+  }, []);
+
+  const fetchPaystackConfig = async () => {
+    setIsFetchingPaystackConfig(true);
+    try {
+      const res = await fetch('/api/paystack/config');
+      const data = await res.json();
+      setPaystackConfig(data);
+    } catch (e) {
+      console.warn('Could not load Paystack admin config', e);
+    } finally {
+      setIsFetchingPaystackConfig(false);
+    }
+  };
+
+  const handleManualVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyRefInput.trim()) return;
+
+    setIsVerifyingRef(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch(`/api/paystack/verify/${encodeURIComponent(verifyRefInput.trim())}`);
+      const data = await res.json();
+      setVerifyResult(data);
+      if (data.status) {
+        showToast('Reference verified successfully with Paystack!', 'success');
+      } else {
+        showToast('Paystack returned error for this reference', 'error');
+      }
+    } catch (err: any) {
+      setVerifyResult({ status: false, message: err.message });
+      showToast('Failed to connect to verification API', 'error');
+    } finally {
+      setIsVerifyingRef(false);
+    }
+  };
+
+  const copyWebhookUrl = () => {
+    const url = `${window.location.origin}/api/paystack/webhook`;
+    navigator.clipboard.writeText(url);
+    setCopiedWebhook(true);
+    showToast('Copied Webhook URL to clipboard!', 'info');
+    setTimeout(() => setCopiedWebhook(false), 2500);
+  };
 
   // Add Product Form State
   const [showAddForm, setShowAddForm] = useState(false);
@@ -152,6 +232,59 @@ export const AdminDashboardView: React.FC = () => {
     setShowAddForm(false);
   };
 
+  if (!isAdmin) {
+    return (
+      <div className="max-w-xl mx-auto py-16 px-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center shadow-xl space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center mx-auto">
+            <Shield className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <span className="px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 font-bold text-xs">
+              Restricted Area
+            </span>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white font-display">
+              Administrator Access Required
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+              You are currently signed in with a <strong className="text-slate-800 dark:text-slate-200">Customer Account</strong> ({user?.name || user?.email || 'Guest'}). Only store administrators can modify catalog items, update customer shipments, and configure the Paystack payment gateway.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-left space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-600 dark:text-slate-300">Default Admin Account</span>
+              <span className="text-amber-600 dark:text-amber-400 font-bold">Store Admin</span>
+            </div>
+            <p className="text-xs font-mono text-slate-500 dark:text-slate-400">otelnetclient@gmail.com</p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => loginAdmin('otelnetclient@gmail.com', 'Store Administrator')}
+              className="flex-1 py-3 px-4 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-white text-white dark:text-slate-900 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+            >
+              <Shield className="w-4 h-4 text-amber-400 dark:text-amber-600" />
+              <span>Switch to Admin Account</span>
+            </button>
+            <button
+              onClick={() => setIsAccountSwitcherOpen(true)}
+              className="py-3 px-4 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-bold text-xs sm:text-sm transition-all cursor-pointer"
+            >
+              Switch Accounts
+            </button>
+            <button
+              onClick={() => setCurrentTab('discover')}
+              className="py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs sm:text-sm transition-all cursor-pointer"
+            >
+              Back to Store
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-16">
       {/* Admin Top Banner */}
@@ -261,6 +394,18 @@ export const AdminDashboardView: React.FC = () => {
         >
           <TrendingUp className="w-4 h-4" />
           <span>Store Analytics</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('paystack')}
+          className={`flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'paystack'
+              ? 'bg-teal-700 text-white shadow-xs font-black'
+              : 'text-slate-600 hover:text-teal-700'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Paystack Gateway</span>
         </button>
       </div>
 
@@ -741,6 +886,12 @@ export const AdminDashboardView: React.FC = () => {
                       {formatPrice(ord.total)}
                     </p>
                     <p className="text-[11px] text-slate-500">{ord.paymentMethod}</p>
+                    {(ord.paymentGateway === 'paystack' || ord.paymentReference) && (
+                      <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 text-[10px] font-mono font-bold">
+                        <ShieldCheck className="w-3 h-3 text-teal-600" />
+                        <span>Paystack: {(ord.paymentReference || ord.paystackDetails?.reference || '').slice(0, 14)}...</span>
+                      </div>
+                    )}
                     {ord.promoCodeApplied && (
                       <span className="text-[10px] text-emerald-700 font-bold">
                         Coupon {ord.promoCodeApplied} applied
@@ -915,6 +1066,237 @@ export const AdminDashboardView: React.FC = () => {
                   <span className="font-bold text-slate-900 font-mono">13%</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: PAYSTACK GATEWAY SETTINGS & LIVE LOGS */}
+      {activeTab === 'paystack' && (
+        <div className="space-y-6">
+          {/* Paystack Connection Card */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-600">
+                  <CreditCard className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-slate-900 font-display">
+                      Paystack Payment Gateway
+                    </h3>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                        paystackConfig.configured
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {paystackConfig.configured ? 'Live / Active' : 'Sandbox Demo Mode'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Supports Nigerian Naira (NGN), Card payments, Instant Bank Transfer, USSD, and Inline popups.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={fetchPaystackConfig}
+                disabled={isFetchingPaystackConfig}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPaystackConfig ? 'animate-spin' : ''}`} />
+                <span>Refresh Status</span>
+              </button>
+            </div>
+
+            {/* Diagnostics Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                  Secret API Key (Backend)
+                </span>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {paystackConfig.configured ? (
+                    <>
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="text-xs font-bold text-emerald-900">Loaded & Verified</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span className="text-xs font-bold text-amber-800">PAYSTACK_SECRET_KEY not set (Demo active)</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                  Public Key (Inline SDK)
+                </span>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {paystackConfig.hasPublicKey ? (
+                    <>
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="text-xs font-bold text-emerald-900 truncate font-mono">
+                        {paystackConfig.publicKey?.slice(0, 16)}...
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span className="text-xs font-bold text-amber-800">Using Demo Key</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">
+                  Primary Currencies
+                </span>
+                <span className="text-xs font-extrabold text-slate-900 mt-1 block">
+                  NGN (₦), USD ($), GHS (₵), ZAR (R)
+                </span>
+              </div>
+            </div>
+
+            {/* Webhook Configuration Help */}
+            <div className="p-4 rounded-2xl bg-teal-50/50 border border-teal-200 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <span className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Paystack Webhook Listener Endpoint</span>
+                  </span>
+                  <p className="text-[11px] text-teal-800 mt-0.5">
+                    Add this webhook URL in your <strong>Paystack Dashboard &gt; Settings &gt; API Keys &amp; Webhooks</strong>.
+                  </p>
+                </div>
+
+                <button
+                  onClick={copyWebhookUrl}
+                  className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  {copiedWebhook ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedWebhook ? 'Copied URL!' : 'Copy Webhook URL'}</span>
+                </button>
+              </div>
+
+              <div className="bg-white p-2 rounded-xl border border-teal-200/80 font-mono text-xs text-slate-800 select-all overflow-x-auto">
+                {window.location.origin}/api/paystack/webhook
+              </div>
+            </div>
+          </div>
+
+          {/* Live Transaction Verifier Sandbox */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+            <div>
+              <h4 className="text-sm font-black text-slate-900 font-display">
+                Manual Paystack Reference Lookup
+              </h4>
+              <p className="text-xs text-slate-500">
+                Inspect and query any transaction reference directly with the Paystack REST API.
+              </p>
+            </div>
+
+            <form onSubmit={handleManualVerify} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="e.g. ps_ord_1740000000_abc or pstk_ref_xyz"
+                value={verifyRefInput}
+                onChange={(e) => setVerifyRefInput(e.target.value)}
+                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-xs text-slate-900 focus:outline-none focus:border-teal-600"
+              />
+              <button
+                type="submit"
+                disabled={isVerifyingRef || !verifyRefInput.trim()}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                {isVerifyingRef ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Search className="w-3.5 h-3.5" />
+                )}
+                <span>Query Paystack</span>
+              </button>
+            </form>
+
+            {verifyResult && (
+              <div className="p-4 rounded-2xl bg-slate-900 text-white font-mono text-xs space-y-2 overflow-x-auto">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">
+                    Paystack API Raw Response
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      verifyResult.status ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                    }`}
+                  >
+                    Status: {String(verifyResult.status)}
+                  </span>
+                </div>
+                <pre className="text-[11px] leading-relaxed text-slate-300">
+                  {JSON.stringify(verifyResult, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+
+          {/* Paystack Orders In System */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+            <h4 className="text-sm font-black text-slate-900 font-display">
+              Orders Processed via Paystack ({orders.filter((o) => o.paymentGateway === 'paystack' || o.paymentReference).length})
+            </h4>
+
+            <div className="divide-y divide-slate-100">
+              {orders
+                .filter((o) => o.paymentGateway === 'paystack' || o.paymentReference)
+                .map((ord) => (
+                  <div key={ord.id} className="py-3.5 flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-display font-bold text-xs text-slate-900">
+                          Order {ord.id}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-mono text-[10px] font-bold">
+                          {ord.paymentStatus || 'Verified'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Ref:{' '}
+                        <span className="font-mono font-bold text-slate-800">
+                          {ord.paymentReference || ord.paystackDetails?.reference || 'N/A'}
+                        </span>{' '}
+                        • Channel: {ord.paystackDetails?.channel || 'Online'} • {ord.createdAt}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-black text-sm text-slate-900">
+                        {formatPrice(ord.total)}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setVerifyRefInput(ord.paymentReference || ord.paystackDetails?.reference || '');
+                          setActiveTab('paystack');
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors cursor-pointer"
+                      >
+                        Inspect Ref
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+              {orders.filter((o) => o.paymentGateway === 'paystack' || o.paymentReference).length === 0 && (
+                <p className="text-xs text-slate-400 py-6 text-center">
+                  No orders have been processed through Paystack yet. Test a checkout order using the Paystack option!
+                </p>
+              )}
             </div>
           </div>
         </div>
